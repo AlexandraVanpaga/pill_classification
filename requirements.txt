@@ -1,0 +1,14 @@
+--index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1+cu124
+torchvision==0.20.1+cu124
+torchaudio==2.5.1+cu124
+
+--extra-index-url https://pypi.org/simple
+matplotlib==3.10.0
+Pillow==10.4.0
+numpy==1.26.4
+torchsummary==1.5.1
+scikit-learn==1.6.0
+tqdm==4.66.4
+requests==2.32.3
+seaborn==0.12.2
