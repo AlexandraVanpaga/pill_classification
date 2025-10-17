@@ -13,7 +13,7 @@ models/
 data/
 *.csv
 *.jpg
-
+*.zip
 # Результаты
 results/
 *.json

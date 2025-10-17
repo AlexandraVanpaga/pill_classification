@@ -14,7 +14,7 @@ python -m src.get_raw_data
 python -m src.data_preprocessing
 
 #Объявление модели
-python -m model_efficientnet.py
+python -m src.model_efficientnet
 
 #Обучение CNN-модели
 python -m src.model_train

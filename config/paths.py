@@ -1,5 +1,6 @@
 import os
-BASE_DIR = r'C:\Users\Alexandra\Desktop\PILL_CLASSIFICATION'
+
+BASE_DIR = r'/home/ubuntu/pill_classification'
 PATHS = {
     # Сырые данные
     'raw_data': os.path.join(BASE_DIR, 'dataset', 'raw_dataset.zip'),

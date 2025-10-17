@@ -6,6 +6,7 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from config import MODEL_CONFIG
 
 
 class PillClassifierEfficientNetB4(nn.Module):
@@ -14,16 +15,18 @@ class PillClassifierEfficientNetB4(nn.Module):
     
     Архитектура:
     - Pretrained EfficientNet-B4 backbone (ImageNet)
-    - Частичная разморозка последних 3 блоков
+    - Частичная разморозка последних N блоков
     - Многослойный classifier с Dropout и BatchNorm
-    - Постепенное уменьшение размерности: 1792 -> 896 -> 448 -> 224 -> num_classes
+    - Постепенное уменьшение размерности
     
     Args:
-        num_classes (int): количество классов для классификации
-        dropout_rate (float): базовый уровень dropout (по умолчанию 0.5)
+        config (dict): конфигурация модели (если None, используется MODEL_CONFIG)
     """
-    def __init__(self, num_classes=84, dropout_rate=0.5):
+    def __init__(self, config=None):
         super().__init__()
+        
+        if config is None:
+            config = MODEL_CONFIG
         
         # Загружаем pretrained EfficientNet-B4
         self.backbone = models.efficientnet_b4(
@@ -34,9 +37,9 @@ class PillClassifierEfficientNetB4(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
         
-        # Размораживаем последние 3 блока для fine-tuning
+        # Размораживаем последние N блоков для fine-tuning
         total_blocks = len(self.backbone.features)
-        unfreeze_from = total_blocks - 3
+        unfreeze_from = total_blocks - config['unfreeze_last_n_blocks']
         
         for i in range(unfreeze_from, total_blocks):
             for param in self.backbone.features[i].parameters():
@@ -47,31 +50,30 @@ class PillClassifierEfficientNetB4(nn.Module):
         print(f"  Разморожено блоков: {total_blocks - unfreeze_from}/{total_blocks}")
         
         # Заменяем classifier с сильной регуляризацией
-        num_features = self.backbone.classifier[1].in_features  # 1792 для B4
+        num_features = self.backbone.classifier[1].in_features
+        hidden_dims = config['classifier_hidden_dims']
+        dropouts = config['classifier_dropouts']
         
-        self.backbone.classifier = nn.Sequential(
-            # Слой 1: 1792 -> 896
-            nn.Dropout(dropout_rate),           # 0.5
-            nn.Linear(num_features, 896),
-            nn.BatchNorm1d(896),
-            nn.ReLU(),
-            
-            # Слой 2: 896 -> 448
-            nn.Dropout(dropout_rate - 0.1),     # 0.4
-            nn.Linear(896, 448),
-            nn.BatchNorm1d(448),
-            nn.ReLU(),
-            
-            # Слой 3: 448 -> 224
-            nn.Dropout(dropout_rate - 0.2),     # 0.3
-            nn.Linear(448, 224),
-            nn.BatchNorm1d(224),
-            nn.ReLU(),
-            
-            # Выходной слой: 224 -> num_classes
-            nn.Dropout(dropout_rate - 0.3),     # 0.2
-            nn.Linear(224, num_classes)
-        )
+        layers = []
+        in_features = num_features
+        
+        # Создаем скрытые слои
+        for i, (hidden_dim, dropout) in enumerate(zip(hidden_dims, dropouts[:-1])):
+            layers.extend([
+                nn.Dropout(dropout),
+                nn.Linear(in_features, hidden_dim),
+                nn.BatchNorm1d(hidden_dim),
+                nn.ReLU()
+            ])
+            in_features = hidden_dim
+        
+        # Финальный слой
+        layers.extend([
+            nn.Dropout(dropouts[-1]),
+            nn.Linear(in_features, config['num_classes'])
+        ])
+        
+        self.backbone.classifier = nn.Sequential(*layers)
     
     def forward(self, x):
         """
@@ -112,7 +114,7 @@ class PillClassifierEfficientNetB4(nn.Module):
         """
         total_blocks = len(self.backbone.features)
         
-        # Определяем текущее количество разморожженных блоков
+        # Определяем текущее количество замороженных блоков
         frozen_count = sum(1 for i in range(total_blocks) 
                           if not any(p.requires_grad for p in self.backbone.features[i].parameters()))
         
@@ -127,24 +129,23 @@ class PillClassifierEfficientNetB4(nn.Module):
         print(f"Теперь обучается с блока {unfreeze_from}/{total_blocks}")
 
 
-def create_model(num_classes, dropout_rate=0.5, device='cuda'):
+def create_model(config=None, device='cuda'):
     """
     Фабричная функция для создания модели
     
     Args:
-        num_classes (int): количество классов
-        dropout_rate (float): уровень dropout
+        config (dict): конфигурация модели (если None, используется MODEL_CONFIG)
         device (str): устройство ('cuda' или 'cpu')
         
     Returns:
         model: готовая к обучению модель
     """
+    if config is None:
+        config = MODEL_CONFIG
+    
     device = torch.device(device if torch.cuda.is_available() else 'cpu')
     
-    model = PillClassifierEfficientNetB4(
-        num_classes=num_classes,
-        dropout_rate=dropout_rate
-    ).to(device)
+    model = PillClassifierEfficientNetB4(config=config).to(device)
     
     # Выводим статистику
     params = model.get_num_params()
@@ -161,48 +162,49 @@ def create_model(num_classes, dropout_rate=0.5, device='cuda'):
     print(f"{'='*60}")
     
     print("\nМеры против переобучения:")
-    print("  ✓ Dropout слои (0.5 -> 0.4 -> 0.3 -> 0.2)")
+    print(f"  ✓ Dropout слои {config['classifier_dropouts']}")
     print("  ✓ BatchNorm после каждого Linear")
-    print("  ✓ Частичная разморозка (последние 3 блока)")
+    print(f"  ✓ Частичная разморозка (последние {config['unfreeze_last_n_blocks']} блока)")
     print("  ✓ Постепенное уменьшение размерности")
     print("  ✓ Pretrained веса (ImageNet)")
     
     return model
 
 
-def get_optimizer_and_scheduler(model, lr=0.001, weight_decay=0.05, epochs=40):
+def get_optimizer_and_scheduler(model, config=None):
     """
     Создаёт оптимизатор и scheduler для модели
     
     Args:
         model: модель для обучения
-        lr (float): начальный learning rate
-        weight_decay (float): коэффициент L2 регуляризации
-        epochs (int): количество эпох для scheduler
+        config (dict): конфигурация (если None, используется MODEL_CONFIG)
         
     Returns:
         tuple: (optimizer, scheduler)
     """
+    if config is None:
+        config = MODEL_CONFIG
+    
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=lr,
-        weight_decay=weight_decay,
-        betas=(0.9, 0.999)
+        lr=config['learning_rate'],
+        weight_decay=config['weight_decay'],
+        betas=config['betas']
     )
     
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=epochs,
-        eta_min=1e-6
+        T_max=config['scheduler_T_max'],
+        eta_min=config['scheduler_eta_min']
     )
     
     print(f"\n{'='*60}")
     print("ПАРАМЕТРЫ ОПТИМИЗАЦИИ")
     print(f"{'='*60}")
     print(f"Optimizer:       AdamW")
-    print(f"Learning Rate:   {lr:.6f}")
-    print(f"Weight Decay:    {weight_decay:.2f}")
-    print(f"Scheduler:       CosineAnnealingLR (T_max={epochs})")
+    print(f"Learning Rate:   {config['learning_rate']:.6f}")
+    print(f"Weight Decay:    {config['weight_decay']:.2f}")
+    print(f"Scheduler:       CosineAnnealingLR (T_max={config['scheduler_T_max']})")
     print(f"{'='*60}\n")
     
     return optimizer, scheduler
@@ -213,11 +215,10 @@ if __name__ == "__main__":
     print("Тестирование модуля model_efficientnet.py\n")
     
     # Создание модели
-    num_classes = 84
-    model = create_model(num_classes=num_classes, dropout_rate=0.5, device='cuda')
+    model = create_model(config=MODEL_CONFIG, device='cuda')
     
     # Создание оптимизатора
-    optimizer, scheduler = get_optimizer_and_scheduler(model, lr=0.001, weight_decay=0.05)
+    optimizer, scheduler = get_optimizer_and_scheduler(model, config=MODEL_CONFIG)
     
     # Тестовый forward pass
     print("\nТестовый forward pass:")
