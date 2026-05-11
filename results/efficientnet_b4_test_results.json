@@ -1,0 +1,31 @@
+{
+    "model": "EfficientNet-B4",
+    "timestamp": "20251017_132538",
+    "validation": {
+        "val_accuracy": 86.80851063829788,
+        "val_loss": 1.5363010088602702,
+        "gap": -16.510954846586927
+    },
+    "test_baseline": {
+        "accuracy": 84.92063492063492,
+        "method": "Single prediction"
+    },
+    "test_tta": {
+        "accuracy": 88.4920634920635,
+        "method": "TTA (4 augmentations)",
+        "augmentations": [
+            "original",
+            "h_flip",
+            "v_flip",
+            "both_flips"
+        ]
+    },
+    "improvement": {
+        "tta_boost": 3.57142857142857
+    },
+    "goal_achieved": true,
+    "dataset": {
+        "num_classes": 84,
+        "test_samples": 504
+    }
+}
